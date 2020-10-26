@@ -1,42 +1,37 @@
 import json
 import jsonschema
 
-# verify field names match
-# verify item coverage (all products in JSON)
-# verify field coverage (all items contain all fields)
-
-# check for repeats -> best practice? seems reasonable to choose unique ID and add to list and check list for ID
-
-
-with open('data.json') as f:              # sets JSON data to 'data'
+with open('data.json') as f:          # sets JSON data to 'data'
     data = json.load(f)
 
 
-schema = {                                # schema to check against JSON to validate values TODO put in own file?
+schema = {                            # schema to check against JSON to validate values, mandates all values are present
     "$schema": "http://json-schema.org/draft/2019-09/schema#",
-    "required": ["vendor", "url", "series", "category", "path", "release", "endofsale", "endofsupport", "downloads"],
+    "required": ["vendor", "url", "series", "category", "model", "path", "release", "endofsale", "endofsupport", "downloads"],
     "properties": {
         "vendor": {
             "type": "string",
-            "const": "cisco.com",          # Scrape is cisco products, so Cisco should always be the vendor
+            "const": "cisco.com",     # Scrape is cisco products, so Cisco should always be the vendor
             },
         "url": {
-            "type": "string",              # below regex checks for URL with 'cisco.com' optional 'www' and 'https://'
+            "type": "string",         # below regex checks for URL with 'cisco.com' optional 'www' and 'https://'
             "pattern": "^(https:\/\/)?(www.)?(cisco.com)(\/)[a-zA-Z\d+\!@#\$%&\/]{2,40}\/support\/[0-9a-zA-Z-\/]{4,}\/"
                        "(model|series).html"
         },
         "series": {
             "type": "string",
+            "pattern": "^(?!null)"   # checks for null values which are not permitted in necessary fields
         },
         "category": {
             "type": "string",
+            "pattern": "^(?!null)"
         },
         "model": {
             "type": "string",
+            "pattern": "^(?!null)"
         },
-        "path": {                    # check for unix structure
+        "path": {                          # TODO define pattern by what permitted in unix path
             "type": "string",
-            "format": "uri",
         },
         "release": {
             "type": "string",
@@ -52,25 +47,36 @@ schema = {                                # schema to check against JSON to vali
         },
         "downloads": {
             "type": "array",
-            "required": ["latest", "filesname", "size", "md5", "all"],
-            "items": {
-                "type": "object",
-                "properties": {
-                    "latest": {"type": "string"},
-                    "filename": {"type": "string"},
-                    "size": {
-                        "type": "string",
-                        "pattern": "\d{7,8}",
-                    },
-                    "md5": {
-                        "type": "string",
-                        "pattern": "\w{32}",
+            "items": [
+                {
+                    "type": "object",
+                    "required": ["latest", "filename", "size", "md5"],
+                    "properties": {
+                        "latest": {"type": "string"},
+                        "filename": {"type": "string"},
+                        "size": {
+                            "type": "string",
+                            "pattern": "\d{7,8}",
+                        },
+                        "md5": {
+                            "type": "string",
+                            "pattern": "\w{32}",               # checks that key is 32 characters
                             },
-                    "all": {"type": "string"}
-                }
-            },
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": ["all"],
+                    "properties": {
+                        "all": {
+                            "type": "string",
+                            "pattern": "^(https:\/\/)?(www)?(software\.)?(cisco.com)(\/)(download)[a-zA-Z\d+\!@#\$%&\/]{2,60}",
+                        }
+                    }
+                },
+            ]
         }
-    }
+    },
 }
 
 
@@ -79,7 +85,7 @@ def check_missing_keys(check_data):                  # check for keys likely to 
     for product in check_data:                       # If other keys are missing data is irrelevant
         for key in optional_keys:
             if key not in product:
-                product[key] = 'null'
+                product[key] = 'null'                # creates key if val
     return check_data
 
 
@@ -92,16 +98,22 @@ def convert_int_to_str(json_data):
     return json_data
 
 
-def validate_data(cleaned_data):
-    for i, item in enumerate(cleaned_data):
-        print(f'item {i}: {jsonschema.validate(item, schema)}')
-        # what best to return if data checks out?
+def validate_data(finalized_data):
+    for item in finalized_data:
+        try:
+            jsonschema.validate(item, schema)
+        except jsonschema.exceptions.ValidationError:
+            v = jsonschema.Draft7Validator(schema)
+            errors = sorted(v.iter_errors(item), key=lambda e: e.path)
+            for error in errors:
+                print(f'{error.message} in {item["model"]}, {item["url"]}')
+            return "Error in data"
+    print('data passes')
+    return "data passes"
 
+check_missing_keys(data)
+convert_int_to_str(data)
 
-# checks/formats data
-all_keys = check_missing_keys(data)
-data_as_strings = convert_int_to_str(all_keys)
-
-# checks if data valid
-validate_data(data_as_strings)                     # main checking function called with sterilized data
+# checks if all keys and values valid
+validate_data(data)
 
